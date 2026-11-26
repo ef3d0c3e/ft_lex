@@ -1,0 +1,62 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel outdated runs of the same branch or pull request
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc
+          - clang
+
+    container:
+      # Stable release with C23 capable compilers (GCC 14, Clang 19)
+      image: debian:trixie
+      # LeakSanitizer needs ptrace
+      options: --cap-add=SYS_PTRACE
+
+    env:
+      CC: ${{ matrix.compiler }}
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            ca-certificates \
+            git \
+            make \
+            gcc \
+            clang \
+            flex
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Show compiler version
+        run: $CC --version
+
+      # ft_lex, libl and the generated scanners are all built with sanitizers. Any sanitizer error
+      # is fatal, so it fails the test instead of only being printed.
+      - name: Test
+        run: make test EXTRA_CFLAGS='-g -fsanitize=address,undefined -fno-sanitize-recover=all'

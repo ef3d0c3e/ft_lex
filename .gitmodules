@@ -1,0 +1,6 @@
+[submodule "libs/format"]
+	path = libs/format
+	url = https://github.com/ef3d0c3e/format.git
+[submodule "libs/cash"]
+	path = libs/cash
+	url = https://github.com/ef3d0c3e/cash.git

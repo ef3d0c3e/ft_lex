@@ -1,0 +1,7 @@
+#include stdio
+  #notdirective
+
+   
+print(width) 12px 50% 7 end
+end middle
+abccc abd ab

@@ -1,0 +1,2 @@
+let x; y /* a * comment
+ over lines */ "str \"esc\" \\ end" z
