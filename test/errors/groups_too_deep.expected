@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 2:1001
+message: unexpected `(': groups are nested too deeply (limit is 1000 levels)

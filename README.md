@@ -1,3 +1,5 @@
+![Test badge](https://github.com/ef3d0c3e/ft_lex/actions/workflows/tests.yml/badge.svg)
+
 # Running tests
 
 To run tests, make sure `flex` and `diff` are installed.

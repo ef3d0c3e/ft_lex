@@ -1,0 +1,3 @@
+type: Error
+at: 2:1001
+message: regular expression is nested too deeply (limit is 1000 levels)

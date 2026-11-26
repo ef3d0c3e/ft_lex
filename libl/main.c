@@ -2,8 +2,8 @@
  * @file
  * @brief Default `main` of the lex library (`-l l`)
  *
- * Calls `yylex()` until it returns `0` (end of input), so actions that return tokens do not stop
- * the scanner. This matches flex's `libfl`.
+ * As specified by POSIX.1-2024: "Calls yylex() to perform lexical analysis, then exits". `yylex()`
+ * is called once, so an action returning a token ends the program.
  *
  * Kept in its own object file, so programs defining their own `yywrap` can still use it.
  */
@@ -12,9 +12,10 @@ int
 yylex(void);
 
 int
-main(void)
+main(int argc, char* argv[])
 {
-	while (yylex() != 0)
-		;
+	(void)argc;
+	(void)argv;
+	yylex();
 	return 0;
 }

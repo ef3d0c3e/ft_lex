@@ -23,6 +23,9 @@
  *    would be empty because of trailing context, are ignored.
  *  - Input that no rule matches is copied to `yyout`, one byte at a time.
  *  - `input()` returns `0` at end of file.
+ *  - Fatal errors (out of memory, token longer than `YYLMAX` with `%array`) are reported once on
+ *    the standard error, then `yylex()` returns `0` as if the input had ended. `exit()` is never
+ *    called: the generated code only uses `<stdio.h>`, `<string.h>` and `realloc`.
  *  - `REJECT` selects the next best match: the next rule matching the same text, then rules
  *    matching shorter prefixes. It must not be used after `input()`, `unput()` or `yyless()` in
  *    the same action.

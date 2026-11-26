@@ -100,7 +100,20 @@ new_node(regex_node node)
 {
 	regex_node* ptr = xmalloc(sizeof(*ptr));
 	*ptr = node;
+	ptr->depth = regex_node_depth(ptr);
 	return ptr;
+}
+
+/** @brief Error for a regex deeper than @ref REGEX_DEPTH_LIMIT, spanning from @p start */
+[[nodiscard]]
+static parse_error
+too_deep(const parse_state* s, size_t start)
+{
+	return (parse_error){ kParseGeneric,
+	                      start,
+	                      s->cursor.pos,
+	                      "regular expression is nested too deeply (limit is 1000 levels)",
+	                      {} };
 }
 
 [[nodiscard]]
@@ -540,6 +553,9 @@ parse_atom(parse_state* s, size_t depth, regex_node** out)
 	switch (c) {
 		case '(': {
 			const size_t start = s->cursor.pos;
+			/* Each group is parsed recursively */
+			if (depth + 1 > REGEX_DEPTH_LIMIT)
+				return unexpected_current(s, "groups are nested too deeply (limit is 1000 levels)");
 			skip(s, 1);
 			regex_node* inner;
 			const auto err = parse_alternation(s, depth + 1, &inner);
@@ -609,6 +625,7 @@ parse_repeat(parse_state* s, size_t depth, regex_node** out)
 	}
 
 	while (1) {
+		const size_t operator_start = s->cursor.pos;
 		size_t min, max;
 		if (accept(s, "*")) {
 			min = 0;
@@ -630,6 +647,11 @@ parse_repeat(parse_state* s, size_t depth, regex_node** out)
 
 		node = new_node(
 		  (regex_node){ .type = kRegexRepeat, .data.repeat = { node, min, max } });
+		/* e.g. `a*****...` */
+		if (node->depth > REGEX_DEPTH_LIMIT) {
+			regex_free(node);
+			return too_deep(s, operator_start);
+		}
 	}
 	*out = node;
 	return parse_ok();
@@ -650,6 +672,7 @@ at_concat_end(const parse_state* s, size_t depth)
 static parse_error
 parse_concat(parse_state* s, size_t depth, regex_node** out)
 {
+	const size_t start = s->cursor.pos;
 	node_list items = {};
 	while (!at_concat_end(s, depth)) {
 		regex_node* node;
@@ -671,6 +694,10 @@ parse_concat(parse_state* s, size_t depth, regex_node** out)
 		                      { .token = PARSE_TOKEN_LIT("<regex>") } };
 	}
 	*out = list_into(&items, kRegexConcat);
+	if ((*out)->depth > REGEX_DEPTH_LIMIT) {
+		regex_free(*out);
+		return too_deep(s, start);
+	}
 	return parse_ok();
 }
 
@@ -678,6 +705,7 @@ parse_concat(parse_state* s, size_t depth, regex_node** out)
 static parse_error
 parse_alternation(parse_state* s, size_t depth, regex_node** out)
 {
+	const size_t start = s->cursor.pos;
 	node_list alternatives = {};
 	do {
 		regex_node* node;
@@ -690,6 +718,10 @@ parse_alternation(parse_state* s, size_t depth, regex_node** out)
 	} while (accept(s, "|"));
 
 	*out = list_into(&alternatives, kRegexAlternation);
+	if ((*out)->depth > REGEX_DEPTH_LIMIT) {
+		regex_free(*out);
+		return too_deep(s, start);
+	}
 	return parse_ok();
 }
 

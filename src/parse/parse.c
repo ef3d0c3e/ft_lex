@@ -589,7 +589,7 @@ parse_rule(parse_state* s)
 		*newline = '\n';
 		r.trailing = xmalloc(sizeof(*r.trailing));
 		*r.trailing =
-		  (regex_node){ .type = kRegexLiteral, .data.literal = { .str = newline, .len = 1 } };
+		  (regex_node){ .type = kRegexLiteral, .depth = 1, .data.literal = { .str = newline, .len = 1 } };
 	}
 	r.location = (token){ start, s->cursor };
 

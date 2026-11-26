@@ -13,7 +13,8 @@
  * Usage: `ft_lex [-t] [-n|-v] [file...]`
  *  - `-t`: write the scanner to the standard output instead of `lex.yy.c`
  *  - `-n`: suppress the statistics summary
- *  - `-v`: write a statistics summary to the standard error
+ *  - `-v`: write a statistics summary to the standard output, or to the standard error with `-t`
+ *    (as specified by POSIX, the standard output then holds the scanner)
  *
  * Input files are concatenated. The standard input is read when no file is given, or for `-`.
  */
@@ -25,13 +26,13 @@ usage(const char* program)
 }
 
 static void
-print_statistics(const document* doc, const nfa* n, const dfa* d)
+print_statistics(FILE* out, const document* doc, const nfa* n, const dfa* d)
 {
 	size_t transitions = 0;
 	for (size_t i = 0; i < d->state_count * d->class_count; ++i)
 		transitions += d->transitions[i] != DFA_DEAD;
 
-	fprintf(stderr,
+	fprintf(out,
 	        "%zu rules, %zu start conditions\n"
 	        "%zu NFA states\n"
 	        "%zu DFA states, %zu transitions, %zu byte classes\n",
@@ -81,7 +82,7 @@ main(int argc, char** argv)
 	nfa n = nfa_build(doc);
 	dfa d = dfa_build(&n);
 	if (verbose && !quiet)
-		print_statistics(doc, &n, &d);
+		print_statistics(to_stdout ? stderr : stdout, doc, &n, &d);
 	nfa_destroy(&n);
 
 	const char* out_name = to_stdout ? "<stdout>" : "lex.yy.c";

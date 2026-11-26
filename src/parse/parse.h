@@ -139,9 +139,23 @@ regex_set_contains(const regex_set* set, unsigned char c)
 	return (set->bits[c / 64] >> (c % 64)) & 1;
 }
 
+/**
+ * @brief Maximum depth of a regex tree, and maximum nesting of groups
+ *
+ * Trees are processed recursively (automaton construction, copies, ...), deeper trees could
+ * overflow the stack
+ */
+#define REGEX_DEPTH_LIMIT 1000
+
 typedef struct regex_node
 {
 	regex_node_type type;
+	/**
+	 * @brief Depth of the tree rooted at this node, `1` for leaves
+	 *
+	 * Computed from the children with @ref regex_node_depth when the node is created
+	 */
+	size_t depth;
 
 	union
 	{
@@ -176,6 +190,28 @@ typedef struct regex_node
 		} repeat;
 	} data;
 } regex_node;
+
+/** @brief Depth of @p node, from the depths of its children (not recursive) */
+[[nodiscard]] static inline size_t
+regex_node_depth(const regex_node* node)
+{
+	size_t max = 0;
+	switch (node->type) {
+		case kRegexLiteral:
+		case kRegexSet:
+			break;
+		case kRegexConcat:
+		case kRegexAlternation:
+			for (size_t i = 0; i < node->data.list.len; ++i)
+				if (node->data.list.exprs[i]->depth > max)
+					max = node->data.list.exprs[i]->depth;
+			break;
+		case kRegexRepeat:
+			max = node->data.repeat.expr->depth;
+			break;
+	}
+	return max + 1;
+}
 
 void
 regex_free(regex_node* regex);

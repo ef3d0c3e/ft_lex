@@ -84,6 +84,8 @@ typedef struct
 
 	/** @brief Epsilon closure work stack */
 	size_t* stack;
+	/** @brief Closure being computed, before it is copied to a set of the right size */
+	size_t* scratch;
 	/** @brief `visited[id] == generation` when NFA state `id` is in the current closure */
 	size_t* visited;
 	size_t generation;
@@ -100,7 +102,9 @@ closure(builder* b, const size_t* seeds, size_t seed_count)
 	const nfa* n = b->n;
 	++b->generation;
 
-	size_t* result = xmalloc(n->state_count * sizeof(*result));
+	/* Collected in the scratch buffer, which can hold all NFA states. Allocating that much for each
+	 * set would make memory usage quadratic in the number of NFA states */
+	size_t* result = b->scratch;
 	size_t len = 0;
 	size_t top = 0;
 	for (size_t i = 0; i < seed_count; ++i) {
@@ -124,7 +128,10 @@ closure(builder* b, const size_t* seeds, size_t seed_count)
 	}
 
 	len = sort_unique(result, len);
-	return (state_set){ result, len };
+	size_t* ids = xmalloc(len * sizeof(*ids));
+	if (len)
+		memcpy(ids, result, len * sizeof(*ids));
+	return (state_set){ ids, len };
 }
 
 /**
@@ -245,6 +252,7 @@ dfa_build(const nfa* n)
 		.n = n,
 		.d = &d,
 		.stack = xmalloc(n->state_count * sizeof(size_t)),
+		.scratch = xmalloc(n->state_count * sizeof(size_t)),
 		.visited = xmalloc(n->state_count * sizeof(size_t)),
 	};
 	for (size_t i = 0; i < n->state_count; ++i)
@@ -296,6 +304,7 @@ dfa_build(const nfa* n)
 	state_map_destroy(&b.map);
 	free(b.sets);
 	free(b.stack);
+	free(b.scratch);
 	free(b.visited);
 	return d;
 }

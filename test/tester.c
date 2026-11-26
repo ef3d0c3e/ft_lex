@@ -18,9 +18,9 @@
  * Usage: `tester <tests> <ft_lex> [filter]`
  *
  * Tests are grouped in suites, which are directories of `<tests>`. A test is named
- * `<suite>/<name>.yy`, and only tests whose name contains `filter` are run (e.g. `errors/`).
+ * `<suite>/<file>`, and only tests whose name contains `filter` are run (e.g. `errors/`).
  *
- * Suite `corpus`, comparing ft_lex with flex. For every `<name>.yy`:
+ * Suite `corpus`, comparing ft_lex with flex. For every `<name>.l`:
  *  1. A scanner is generated with both ft_lex and flex (`$FLEX`, `flex` by default), and
  *     compiled with `$CC` (`cc` by default) and the flags in `$SCANNER_CFLAGS`, separated by
  *     spaces. Both are linked with the lex library `$LIBL`, when set.
@@ -28,16 +28,25 @@
  *  3. The test passes when, for every input, both scanners exit with the same status and write
  *     the same standard output and standard error, without any sanitizer report.
  *
- * `.yy` files must define `main` and `yywrap`, or rely on `$LIBL` for them. Their actions should
+ * `.l` files must define `main` and `yywrap`, or rely on `$LIBL` for them. Their actions should
  * print a description of each token, which is what gets compared.
  *
- * Suite `errors`, checking that invalid inputs are reported correctly. For every `<name>.yy`,
+ * Suite `scanners`, for behaviour flex does not have or gets wrong. For every `<name>.l`, a
+ * scanner is built with ft_lex only, as above, and run on every file of `<name>/` except
+ * `*.expected` files. The test passes when, for every input, the scanner exits with status 0,
+ * without sanitizer report, and its standard output is exactly `<name>/<input>.expected`.
+ *
+ * Suite `errors`, checking that invalid inputs are reported correctly. For every `<name>.l`,
  * `<name>.expected` describes the expected error, one `key: value` per line:
  *  - `type`: error type, as displayed (e.g. `Unexpected Token`), required
  *  - `at`: `line:column` of the error, required
  *  - `message`: diagnostic message, optional
  * Empty lines and lines starting with `#` are ignored. The test passes when ft_lex exits with
  * status 1, writes no scanner, and reports the expected error.
+ *
+ * Suite `cli`, for the command line interface. Every `<name>.sh` is run with `sh -e`, in an empty
+ * working directory, with the environment variables `FT_LEX` (absolute path of ft_lex), `TESTS`
+ * (absolute path of `<tests>`) and `CC`. The test passes when the script exits with status 0.
  *
  * flex is only needed when corpus tests are selected. Generated files and outputs are kept in
  * `build/test/<suite>/<name>/` for inspection. Exits with status 0 when all selected tests pass.
@@ -94,13 +103,30 @@ make_path(char* out, const char* fmt, ...)
 
 /** @brief Suite being listed by @ref select_test */
 static const char* listed_suite = NULL;
+/** @brief File suffix of the tests of @ref listed_suite */
+static const char* listed_suffix = NULL;
 
-/** @brief Select `.yy` files whose test name, `<suite>/<file>`, matches @ref filter */
+/** @brief Whether @p name ends with @p suffix */
+static bool
+has_suffix(const char* name, const char* suffix)
+{
+	const size_t len = strlen(name);
+	const size_t suffix_len = strlen(suffix);
+	return len > suffix_len && !strcmp(name + len - suffix_len, suffix);
+}
+
+/** @brief Copy @p file without its @p suffix into @p name, a `NAME_MAX + 1` buffer */
+static void
+strip_suffix(char* name, const char* file, const char* suffix)
+{
+	snprintf(name, NAME_MAX + 1, "%.*s", (int)(strlen(file) - strlen(suffix)), file);
+}
+
+/** @brief Select test files whose test name, `<suite>/<file>`, matches @ref filter */
 static int
 select_test(const struct dirent* ent)
 {
-	const size_t len = strlen(ent->d_name);
-	if (len < 3 || strcmp(ent->d_name + len - 3, ".yy"))
+	if (!has_suffix(ent->d_name, listed_suffix))
 		return 0;
 	if (!filter)
 		return 1;
@@ -114,6 +140,13 @@ static int
 select_input(const struct dirent* ent)
 {
 	return ent->d_name[0] != '.';
+}
+
+/** @brief Select input files, ignoring hidden files and expected outputs */
+static int
+select_input_with_expectations(const struct dirent* ent)
+{
+	return ent->d_name[0] != '.' && !has_suffix(ent->d_name, ".expected");
 }
 
 /** @brief Create @p path and its parents */
@@ -318,9 +351,8 @@ run_corpus_test(const char* corpus, const char* ft_lex, const char* file)
 {
 	printf("Test 'corpus/%s': ", file);
 
-	/* `<name>.yy` */
 	char name[NAME_MAX + 1];
-	snprintf(name, sizeof(name), "%.*s", (int)(strlen(file) - 3), file);
+	strip_suffix(name, file, ".l");
 
 	char source[PATH_MAX];
 	char inputs_dir[PATH_MAX];
@@ -569,9 +601,8 @@ run_error_test(const char* errors, const char* ft_lex, const char* file)
 {
 	printf("Test 'errors/%s': ", file);
 
-	/* `<name>.yy` */
 	char name[NAME_MAX + 1];
-	snprintf(name, sizeof(name), "%.*s", (int)(strlen(file) - 3), file);
+	strip_suffix(name, file, ".l");
 
 	char source[PATH_MAX];
 	char expected_path[PATH_MAX];
@@ -636,10 +667,173 @@ run_error_test(const char* errors, const char* ft_lex, const char* file)
 
 /* }}} */
 
+/* {{{ Scanner tests */
+
+/** @brief Run test `scanners/<file>`, from the suite directory @p scanners */
+static bool
+run_scanner_test(const char* scanners, const char* ft_lex, const char* file)
+{
+	printf("Test 'scanners/%s': ", file);
+
+	char name[NAME_MAX + 1];
+	strip_suffix(name, file, ".l");
+
+	char source[PATH_MAX];
+	char inputs_dir[PATH_MAX];
+	char dir[PATH_MAX];
+	char binary[PATH_MAX];
+	if (!make_path(source, "%s/%s", scanners, file) ||
+	    !make_path(inputs_dir, "%s/%s", scanners, name) ||
+	    !make_path(dir, "%s/scanners/%s", WORK_DIR, name) || !make_path(binary, "%s/ft_lex", dir))
+		return false;
+	if (!make_dirs(dir)) {
+		printf("FAILED\n");
+		return false;
+	}
+
+	struct dirent** inputs;
+	const int count = scandir(inputs_dir, &inputs, select_input_with_expectations, alphasort);
+	if (count <= 0) {
+		printf("FAILED\n  no inputs in '%s'\n", inputs_dir);
+		if (count == 0)
+			free(inputs);
+		return false;
+	}
+
+	bool passed = build_scanner(dir, "ft_lex", ft_lex, source);
+	for (int i = 0; passed && i < count; ++i) {
+		const char* input_name = inputs[i]->d_name;
+		char input[PATH_MAX];
+		char expected[PATH_MAX];
+		char out[PATH_MAX];
+		char err[PATH_MAX];
+		if (!make_path(input, "%s/%s", inputs_dir, input_name) ||
+		    !make_path(expected, "%s/%s.expected", inputs_dir, input_name) ||
+		    !make_path(out, "%s/%s.out", dir, input_name) ||
+		    !make_path(err, "%s/%s.err", dir, input_name)) {
+			passed = false;
+			break;
+		}
+
+		const char* const scanner[] = { binary, NULL };
+		const int status = run(scanner, input, out, err);
+		if (has_sanitizer_report(err) || status != 0) {
+			printf("FAILED\n  input '%s': ", input_name);
+			print_status(status);
+			printf("\n  standard error:\n");
+			print_file(err);
+			passed = false;
+		} else if (access(expected, R_OK) != 0) {
+			printf("FAILED\n  input '%s': missing '%s'\n", input_name, expected);
+			passed = false;
+		} else if (!same_content(expected, out)) {
+			printf("FAILED\n  input '%s': output differs (- expected, + ft_lex)\n", input_name);
+			const char* const diff[] = { "diff", "-u", expected, out, NULL };
+			run(diff, NULL, NULL, NULL);
+			passed = false;
+		}
+	}
+
+	if (passed)
+		printf("ok (%d input%s)\n", count, count > 1 ? "s" : "");
+	for (int i = 0; i < count; ++i)
+		free(inputs[i]);
+	free(inputs);
+	return passed;
+}
+
+/* }}} */
+
+/* {{{ Command line tests */
+
+/** @brief Absolute path of @p path, which must exist */
+static bool
+absolute_path(char* out, const char* path)
+{
+	if (!realpath(path, out)) {
+		printf("FAILED\n  ");
+		fflush(stdout);
+		perror(path);
+		return false;
+	}
+	return true;
+}
+
+/** @brief Run test `cli/<file>`, from the suite directory @p cli */
+static bool
+run_cli_test(const char* cli, const char* ft_lex, const char* file)
+{
+	printf("Test 'cli/%s': ", file);
+
+	char name[NAME_MAX + 1];
+	strip_suffix(name, file, ".sh");
+
+	char script[PATH_MAX];
+	char script_abs[PATH_MAX];
+	char ft_lex_abs[PATH_MAX];
+	char tests_abs[PATH_MAX];
+	char dir[PATH_MAX];
+	char log[PATH_MAX];
+	if (!make_path(script, "%s/%s", cli, file) || !make_path(dir, "%s/cli/%s", WORK_DIR, name) ||
+	    !make_path(log, "%s.log", dir) || !absolute_path(script_abs, script) ||
+	    !absolute_path(ft_lex_abs, ft_lex) || !absolute_path(tests_abs, cli))
+		return false;
+	/* `<tests>/cli` -> `<tests>` */
+	*strrchr(tests_abs, '/') = 0;
+
+	/* Start from an empty working directory */
+	const char* const clean[] = { "rm", "-rf", dir, NULL };
+	if (run(clean, NULL, NULL, NULL) != 0 || !make_dirs(dir)) {
+		printf("FAILED\n  cannot create '%s'\n", dir);
+		return false;
+	}
+
+	fflush(stdout);
+	fflush(stderr);
+	const pid_t pid = fork();
+	if (pid == -1) {
+		perror("fork");
+		return false;
+	}
+	if (pid == 0) {
+		redirect(STDIN_FILENO, "/dev/null", O_RDONLY);
+		redirect(STDOUT_FILENO, log, O_WRONLY | O_CREAT | O_TRUNC);
+		dup2(STDOUT_FILENO, STDERR_FILENO);
+		if (chdir(dir) == -1 || setenv("FT_LEX", ft_lex_abs, 1) == -1 ||
+		    setenv("TESTS", tests_abs, 1) == -1 || setenv("CC", cc, 1) == -1)
+			_exit(127);
+		alarm(TIMEOUT);
+		execlp("sh", "sh", "-e", script_abs, (char*)NULL);
+		_exit(127);
+	}
+	int status;
+	while (waitpid(pid, &status, 0) == -1) {
+		if (errno != EINTR) {
+			perror("waitpid");
+			return false;
+		}
+	}
+	status = WIFSIGNALED(status) ? 128 + WTERMSIG(status) : WEXITSTATUS(status);
+
+	if (status == 0 && !has_sanitizer_report(log)) {
+		printf("ok\n");
+		return true;
+	}
+	printf("FAILED\n  script: ");
+	print_status(status);
+	printf("\n  output:\n");
+	print_file(log);
+	return false;
+}
+
+/* }}} */
+
 /** @brief A suite, a directory of the tests directory */
 typedef struct
 {
 	const char* name;
+	/** @brief Suffix of test files */
+	const char* suffix;
 	/** @brief Run the test `<name>/<file>`, from the suite directory `dir` */
 	bool (*run)(const char* dir, const char* ft_lex, const char* file);
 	/** @brief Selected tests, sorted */
@@ -666,9 +860,12 @@ main(int argc, char** argv)
 		libl = getenv("LIBL");
 	parse_scanner_cflags(getenv("SCANNER_CFLAGS") ? getenv("SCANNER_CFLAGS") : "");
 
+	/* The corpus suite must stay first, see the flex check below */
 	suite suites[] = {
-		{ .name = "corpus", .run = run_corpus_test },
-		{ .name = "errors", .run = run_error_test },
+		{ .name = "corpus", .suffix = ".l", .run = run_corpus_test },
+		{ .name = "scanners", .suffix = ".l", .run = run_scanner_test },
+		{ .name = "errors", .suffix = ".l", .run = run_error_test },
+		{ .name = "cli", .suffix = ".sh", .run = run_cli_test },
 	};
 	const size_t suite_count = sizeof(suites) / sizeof(suites[0]);
 
@@ -678,6 +875,7 @@ main(int argc, char** argv)
 		if (!make_path(dir, "%s/%s", tests_dir, suites[i].name))
 			return 2;
 		listed_suite = suites[i].name;
+		listed_suffix = suites[i].suffix;
 		/* Sorted, so the output is the same everywhere */
 		suites[i].count = scandir(dir, &suites[i].tests, select_test, alphasort);
 		if (suites[i].count == -1) {

@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := all
+
 NAME := ft_lex
 CC ?= cc
 
@@ -20,6 +22,21 @@ TEST_OBJECTS := $(addprefix build/,$(TEST_SOURCES:.c=.o))
 
 # {{{ Libraries
 
+# ----------
+# Submodules
+# ----------
+
+# Fetched when the repository was cloned without `--recursive`. A single rule fetches all of them,
+# so parallel builds do not run git concurrently. Nested submodules (libformat's test framework)
+# are not needed to build.
+SUBMODULES := libs/format/Makefile libs/cash/include/cash.h
+
+libs/format/Makefile:
+	@echo "Fetching submodules..."
+	git submodule update --init
+
+libs/cash/include/cash.h: libs/format/Makefile
+
 # ------
 # Format
 # ------
@@ -37,7 +54,7 @@ IFLAGS += -I./libs/cash/include
 
 # }}}
 
-build/%.o: %.c
+build/%.o: %.c | $(SUBMODULES)
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) $(IFLAGS) -MMD -MP -c $< -o $@
 
@@ -75,7 +92,7 @@ test: $(NAME) $(LIBL) $(TESTER)
 # }}}
 
 # Build libs
-$(LIBFORMAT_A):
+$(LIBFORMAT_A): | libs/format/Makefile
 	@echo "Building libformat..."
 	$(MAKE) -C $(dir $(LIBFORMAT_A))
 
