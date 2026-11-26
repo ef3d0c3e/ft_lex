@@ -47,7 +47,8 @@ jobs:
             make \
             gcc-16 \
             clang-22 \
-            flex
+            flex \
+            rustc
 
       - name: Checkout repository
         uses: actions/checkout@v5
