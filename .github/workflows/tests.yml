@@ -23,13 +23,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Pinned versions, available as `gcc-16` and `clang-22` in Debian sid
         compiler:
-          - gcc
-          - clang
+          - gcc-16
+          - clang-22
 
     container:
-      # Stable release with C23 capable compilers (GCC 14, Clang 19)
-      image: debian:trixie
+      # Rolling release, for recent compilers with full C23 support
+      image: debian:sid
       # LeakSanitizer needs ptrace
       options: --cap-add=SYS_PTRACE
 
@@ -44,12 +45,12 @@ jobs:
             ca-certificates \
             git \
             make \
-            gcc \
-            clang \
+            gcc-16 \
+            clang-22 \
             flex
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
