@@ -1,0 +1,7 @@
+WORD(one)
+COMMENT_START(/*)
+COMMENT_END(closed)
+WORD(two)
+COMMENT_START(/*)
+COMMENT_END(closed)
+WORD(three)

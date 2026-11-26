@@ -32,6 +32,22 @@
  * @{
  */
 
+/** @brief Language of the generated scanner */
+typedef enum
+{
+	/** @brief C scanner, as specified by POSIX */
+	kLanguageC,
+	/** @brief Rust lexer (bonus), see @ref codegen_rust */
+	kLanguageRust,
+} target_language;
+
+typedef struct
+{
+	target_language language;
+	/** @brief Pack the transition table (see @ref dfa_packed) instead of writing it in full */
+	bool compress;
+} codegen_options;
+
 /**
  * @brief Write the scanner for @p doc to @p out
  *
@@ -39,9 +55,30 @@
  * @param d Automaton built from @p doc
  * @param out Output stream
  * @param out_name Name of the output, used in `#line` directives
+ * @param options Target language and compression
  */
 [[nodiscard]] EXPECTED()
-codegen(const document* doc, const dfa* d, FILE* out, const char* out_name);
+codegen(const document* doc, const dfa* d, FILE* out, const char* out_name, codegen_options options);
+
+/**
+ * @brief Write a Rust lexer for @p doc to @p out
+ *
+ * Same specification format, with Rust code fragments and actions. The output defines:
+ *  - a constant for each start condition (`INITIAL`, ...)
+ *  - `pub struct Lexer`, created with `Lexer::new(input)` (any `std::io::Read`), with:
+ *    - `lex(&mut self) -> Option<Token>`: the next token, `None` at the end of the input. `Token`
+ *      must be defined by the definitions section (e.g. an `enum`, or `type Token = ();`)
+ *    - `wrap`: called at the end of the input (like `yywrap`), returns the next input, or `None`
+ *      to stop
+ *    - `set_output`: where `echo` and the default rule write, the standard output by default
+ *    - for actions: `begin`, `condition`, `echo`, `yymore`, `yyless`, `input`, `unput`, `text`
+ *
+ * In actions, `yytext` (a `String`, lossily decoded as UTF-8) and `yyleng` (its length in bytes)
+ * hold a copy of the matched text, `return Some(token)` returns a token, and `reject!()` selects
+ * the next best match. `%array` and `%pointer` have no effect.
+ */
+[[nodiscard]] EXPECTED()
+codegen_rust(const document* doc, const dfa* d, FILE* out, const char* out_name, bool compress);
 
 /** @} */
 

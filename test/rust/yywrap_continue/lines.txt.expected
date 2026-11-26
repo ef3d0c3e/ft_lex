@@ -1,0 +1,12 @@
+LINE_START(first)
+WORD(line)
+NUMBER(1)
+LINE_START(second)
+NUMBER(22)
+REWIND
+LINE_START(first)
+WORD(line)
+NUMBER(1)
+LINE_START(second)
+NUMBER(22)
+END

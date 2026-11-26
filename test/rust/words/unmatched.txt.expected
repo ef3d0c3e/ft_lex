@@ -1,0 +1,5 @@
+WORD(unmatched)
+PUNCT(:)
+@#$%WORD(and)
+~WORD(stay)
+NEWLINE(\n)

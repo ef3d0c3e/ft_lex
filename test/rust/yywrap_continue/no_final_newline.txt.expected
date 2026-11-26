@@ -1,0 +1,6 @@
+LINE_START(only)
+WORD(line)
+REWIND
+LINE_START(only)
+WORD(line)
+END

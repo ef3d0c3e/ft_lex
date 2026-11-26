@@ -1,0 +1,6 @@
+Number(12)
+Operator('+')
+Word("abc:3")
+Operator('-')
+Number(7)
+?Word("hello:5")

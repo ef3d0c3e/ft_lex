@@ -1,0 +1,6 @@
+WORD(hello)
+MENTION(@world)
+WORD(world)
+WORD(and)
+MENTION(@x)
+WORD(x)

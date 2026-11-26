@@ -1,0 +1,5 @@
+WORD(mixed)
+WORD(whitespace)
+NEWLINE(\n)
+NEWLINE(\n)
+WORD(trailing)

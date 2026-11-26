@@ -1,0 +1,5 @@
+TAG(<<b>)
+PERCENT_LETTER(%a)
+WORD(bc)
+WORD(words)
+PERCENT_LETTER(%z)

@@ -1,0 +1,6 @@
+OCTAL_HEX(AB)
+TABS(\t\t)
+BACKSLASH_LETTER(\n)
+QUOTED("quoted text")
+TWO_STARS(**)
+OTHER(*)
