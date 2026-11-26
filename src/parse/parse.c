@@ -405,14 +405,73 @@ parse_definitions(parse_state* s)
 
 /* {{{ Rules */
 
+/** @brief Length of the Rust character literal starting at the cursor's `'`, 0 if it is not one */
+[[nodiscard]] static size_t
+rust_char_literal_length(const parse_state* s)
+{
+	/* Escape sequence: up to the closing quote, on the same line */
+	if (lookahead(s, 1) == '\\') {
+		for (size_t i = 2; i < 12; ++i) {
+			const int c = lookahead(s, i);
+			if (c == -1 || c == '\n')
+				return 0;
+			if (c == '\'' && i > 2)
+				return i + 1;
+		}
+		return 0;
+	}
+	/* A single character, of up to 4 bytes in UTF-8. Otherwise, a lifetime or a label */
+	for (size_t i = 2; i <= 5; ++i) {
+		const int c = lookahead(s, i);
+		if (c == '\'')
+			return i + 1;
+		if (c == -1 || c < 0x80)
+			return 0;
+	}
+	return 0;
+}
+
 /**
- * @brief Skip a C block `{ ... }`, the cursor must be on the opening `{`
+ * @brief Length of the Rust raw string literal (`r"..."`, `r#"..."#`, ...) starting at the cursor's
+ * `r`, 0 if it is not one or it is not terminated
+ */
+[[nodiscard]] static size_t
+rust_raw_string_length(const parse_state* s)
+{
+	/* Not the end of an identifier */
+	if (s->cursor.pos > 0) {
+		const int previous = (unsigned char)s->doc.content[s->cursor.pos - 1];
+		if (previous == '_' || isalnum(previous))
+			return 0;
+	}
+	size_t hashes = 0;
+	while (lookahead(s, 1 + hashes) == '#')
+		++hashes;
+	if (lookahead(s, 1 + hashes) != '"')
+		return 0;
+	for (size_t i = 2 + hashes; s->cursor.pos + i < s->doc.size; ++i) {
+		if (lookahead(s, i) != '"')
+			continue;
+		size_t closing = 0;
+		while (closing < hashes && lookahead(s, i + 1 + closing) == '#')
+			++closing;
+		if (closing == hashes)
+			return i + 1 + hashes;
+	}
+	return 0;
+}
+
+/**
+ * @brief Skip a code block `{ ... }`, the cursor must be on the opening `{`
  *
- * Braces inside comments, string literals and character literals are ignored
+ * Braces inside comments, string literals and character literals are ignored. For Rust, block
+ * comments nest, strings may span lines, raw strings are recognized, and `'` may start a lifetime
+ * or a label instead of a character literal.
  */
 [[nodiscard]] static parse_error
-skip_c_block(parse_state* s)
+skip_code_block(parse_state* s)
 {
+	const bool rust = !strcmp(s->language, "rust");
 	const size_t start = s->cursor.pos;
 	size_t depth = 0;
 	while (1) {
@@ -427,15 +486,21 @@ skip_c_block(parse_state* s)
 		/* Comments */
 		if (peek(s, "/*")) {
 			const size_t comment = s->cursor.pos;
+			size_t nesting = 1;
 			skip(s, 2);
-			while (!accept(s, "*/")) {
+			while (nesting != 0) {
 				if (current(s) == -1)
 					return (parse_error){ kParseExpectedToken,
 					                      comment,
 					                      s->doc.size,
 					                      "to terminate comment",
 					                      { .token = PARSE_TOKEN_LIT("*/") } };
-				skip(s, 1);
+				if (accept(s, "*/"))
+					--nesting;
+				else if (rust && accept(s, "/*"))
+					++nesting;
+				else
+					skip(s, 1);
 			}
 			continue;
 		}
@@ -445,13 +510,26 @@ skip_c_block(parse_state* s)
 			continue;
 		}
 
+		if (rust && c == 'r') {
+			const size_t raw = rust_raw_string_length(s);
+			if (raw != 0) {
+				skip(s, raw);
+				continue;
+			}
+		}
+		if (rust && c == '\'') {
+			const size_t literal = rust_char_literal_length(s);
+			skip(s, literal ? literal : 1);
+			continue;
+		}
+
 		/* String and character literals */
 		if (c == '"' || c == '\'') {
 			const size_t literal = s->cursor.pos;
 			skip(s, 1);
 			while (current(s) != c) {
 				const int d = current(s);
-				if (d == -1 || d == '\n')
+				if (d == -1 || (d == '\n' && !rust))
 					return (parse_error){ kParseExpectedToken,
 					                      literal,
 					                      s->cursor.pos,
@@ -508,7 +586,7 @@ parse_action(parse_state* s, rule* r)
 	}
 
 	if (c == '{') {
-		const auto err = skip_c_block(s);
+		const auto err = skip_code_block(s);
 		if (err.status != kParseOk)
 			return err;
 		r->action = (token){ start, s->cursor };
@@ -776,7 +854,7 @@ read_sources(document* doc, const char* const* files, size_t file_count)
 }
 
 EXPECTED(document)
-parse(struct format_output* output, const char* const* files, size_t file_count)
+parse(struct format_output* output, const char* const* files, size_t file_count, const char* language)
 {
 	parse_state s = {};
 	{
@@ -786,7 +864,7 @@ parse(struct format_output* output, const char* const* files, size_t file_count)
 			return EXPECTED_ERR(document, result.error);
 		}
 	}
-	s.language = "c";
+	s.language = language;
 	s.cursor.line = 1;
 
 	char* initial = xmalloc(sizeof("INITIAL"));

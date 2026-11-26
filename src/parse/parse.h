@@ -411,14 +411,19 @@ document_locate(const document* doc, size_t pos, size_t global_line, size_t* lin
  * @param output Output to display parse errors to
  * @param files Input files, concatenated in order. `-` is the standard input
  * @param file_count Number of input files, the standard input is used when `0`
+ * @param language Language of the code fragments and actions, `"c"` or `"rust"`. C code may not
+ * contain trigraphs, and the end of action blocks is found with the language's syntax
  * @return The parsed document, to release with @ref document_destroy
  */
 EXPECTED(document)
-parse(struct format_output* output, const char* const* files, size_t file_count);
+parse(struct format_output* output,
+      const char* const* files,
+      size_t file_count,
+      const char* language);
 
 typedef struct
 {
-	/** @brief Parsed language */
+	/** @brief Language of code fragments and actions, `"c"` or `"rust"` */
 	const char* language;
 
 	/** @brief Current cursor */

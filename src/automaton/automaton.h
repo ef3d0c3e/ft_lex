@@ -197,6 +197,79 @@ dfa_next(const dfa* d, size_t state, unsigned char c)
 	return d->transitions[state * d->class_count + d->byte_class[c]];
 }
 
+/**
+ * @brief Minimize @p d (Hopcroft's algorithm)
+ *
+ * States that accept the same rules, end the same patterns, and whose transitions lead to
+ * equivalent states are merged, so the result scans exactly like @p d. The reverse trailing
+ * context automata are minimized too.
+ */
+[[nodiscard]] dfa
+dfa_minimize(const dfa* d);
+
+/** @} */
+
+/**
+ * @defgroup PackedDFA Packed transition table
+ * @ingroup Automaton
+ * @{
+ */
+
+/** @brief Unused entry of @ref dfa_packed::check, or state without @ref dfa_packed::parent */
+#define DFA_PACK_NONE SIZE_MAX
+
+/** @brief Maximum length of a chain of @ref dfa_packed::parent, which bounds lookups */
+#define DFA_PACK_MAX_DEPTH 8
+
+/**
+ * @brief Compressed transition table of a DFA (comb vector with templates, as in flex)
+ *
+ * Each state may have a parent state, whose transitions it shares except for a few. Only the
+ * transitions that differ from the parent's are stored, in @ref next, which is shared by all
+ * states: the transition of `state` on `class` is `next[base[state] + class]` when
+ * `check[base[state] + class] == state`. Otherwise, it is the parent's transition, or dead when
+ * there is no parent (see @ref dfa_packed_next).
+ */
+typedef struct
+{
+	/** @brief Offset of each state in @ref next and @ref check */
+	size_t* base;
+	/** @brief Parent of each state, @ref DFA_PACK_NONE if none */
+	size_t* parent;
+	/** @brief Stored transitions, @ref DFA_DEAD for the dead state */
+	size_t* next;
+	/** @brief State owning each entry of @ref next, @ref DFA_PACK_NONE if unused */
+	size_t* check;
+	/** @brief Size of @ref next and @ref check */
+	size_t size;
+} dfa_packed;
+
+/** @brief Pack the transition table of @p d */
+[[nodiscard]] dfa_packed
+dfa_pack(const dfa* d);
+
+void
+dfa_packed_destroy(dfa_packed* packed);
+
+/** @brief Number of table entries of @p packed for @p state_count states (base, parent, next, check) */
+[[nodiscard]] static inline size_t
+dfa_packed_entries(const dfa_packed* packed, size_t state_count)
+{
+	return 2 * state_count + 2 * packed->size;
+}
+
+/** @brief Transition from @p state on byte class @p c */
+[[nodiscard]] static inline size_t
+dfa_packed_next(const dfa_packed* packed, size_t state, size_t c)
+{
+	while (packed->check[packed->base[state] + c] != state) {
+		state = packed->parent[state];
+		if (state == DFA_PACK_NONE)
+			return DFA_DEAD;
+	}
+	return packed->next[packed->base[state] + c];
+}
+
 /** @} */
 
 /** @} */
