@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 2:2
+message: unexpected `[:letter:]': unknown character class

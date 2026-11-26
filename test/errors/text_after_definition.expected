@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 1:5
+message: unexpected `b': only <blank>s may follow a definition's regular expression

@@ -55,8 +55,8 @@ $(LIBL): $(LIBL_OBJECTS)
 # {{{ Tests
 
 TESTER := build/tester
-TEST_CORPUS := test/corpus
-# Only run tests whose name contains this, e.g. `make test FILTER=rules`
+TEST_DIR := test
+# Only run tests whose name (`<suite>/<file>`) contains this, e.g. `make test FILTER=errors/`
 FILTER ?=
 # Flex binary to use for testing
 FLEX ?= flex
@@ -70,7 +70,7 @@ $(TESTER): $(TEST_OBJECTS)
 # Scanners are compiled with the same flags as libl, which they are linked with (e.g. sanitizers)
 test: $(NAME) $(LIBL) $(TESTER)
 	FLEX="$(FLEX)" CC="$(CC)" LIBL="$(LIBL)" SCANNER_CFLAGS="$(EXTRA_CFLAGS)" \
-		./$(TESTER) $(TEST_CORPUS) ./$(NAME) $(FILTER)
+		./$(TESTER) $(TEST_DIR) ./$(NAME) $(FILTER)
 
 # }}}
 

@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 2:2
+message: unexpected `>': expected a start condition name

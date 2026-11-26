@@ -1,0 +1,3 @@
+type: Redefinition
+at: 1:4
+message: `INITIAL' is already defined

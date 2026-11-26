@@ -13,11 +13,14 @@
 
 /**
  * @file
- * @brief Corpus test runner, comparing ft_lex with flex
+ * @brief Test runner
  *
- * Usage: `tester <corpus> <ft_lex> [filter]`
+ * Usage: `tester <tests> <ft_lex> [filter]`
  *
- * For every `<name>.yy` file of the corpus whose name contains `filter`:
+ * Tests are grouped in suites, which are directories of `<tests>`. A test is named
+ * `<suite>/<name>.yy`, and only tests whose name contains `filter` are run (e.g. `errors/`).
+ *
+ * Suite `corpus`, comparing ft_lex with flex. For every `<name>.yy`:
  *  1. A scanner is generated with both ft_lex and flex (`$FLEX`, `flex` by default), and
  *     compiled with `$CC` (`cc` by default) and the flags in `$SCANNER_CFLAGS`, separated by
  *     spaces. Both are linked with the lex library `$LIBL`, when set.
@@ -28,8 +31,16 @@
  * `.yy` files must define `main` and `yywrap`, or rely on `$LIBL` for them. Their actions should
  * print a description of each token, which is what gets compared.
  *
- * Generated files and outputs are kept in `build/test/<name>/` for inspection.
- * Exits with status 0 when all selected tests pass.
+ * Suite `errors`, checking that invalid inputs are reported correctly. For every `<name>.yy`,
+ * `<name>.expected` describes the expected error, one `key: value` per line:
+ *  - `type`: error type, as displayed (e.g. `Unexpected Token`), required
+ *  - `at`: `line:column` of the error, required
+ *  - `message`: diagnostic message, optional
+ * Empty lines and lines starting with `#` are ignored. The test passes when ft_lex exits with
+ * status 1, writes no scanner, and reports the expected error.
+ *
+ * flex is only needed when corpus tests are selected. Generated files and outputs are kept in
+ * `build/test/<suite>/<name>/` for inspection. Exits with status 0 when all selected tests pass.
  */
 
 #define WORK_DIR "build/test"
@@ -81,14 +92,21 @@ make_path(char* out, const char* fmt, ...)
 	return true;
 }
 
-/** @brief Select `.yy` files matching @ref filter */
+/** @brief Suite being listed by @ref select_test */
+static const char* listed_suite = NULL;
+
+/** @brief Select `.yy` files whose test name, `<suite>/<file>`, matches @ref filter */
 static int
 select_test(const struct dirent* ent)
 {
 	const size_t len = strlen(ent->d_name);
 	if (len < 3 || strcmp(ent->d_name + len - 3, ".yy"))
 		return 0;
-	return !filter || strstr(ent->d_name, filter);
+	if (!filter)
+		return 1;
+	char name[PATH_MAX];
+	snprintf(name, sizeof(name), "%s/%s", listed_suite, ent->d_name);
+	return strstr(name, filter) != NULL;
 }
 
 /** @brief Select input files, ignoring hidden files */
@@ -294,10 +312,11 @@ build_scanner(const char* dir, const char* name, const char* generator, const ch
 	return true;
 }
 
+/** @brief Run test `corpus/<file>`, from the suite directory @p corpus */
 static bool
-run_test(const char* corpus, const char* ft_lex, const char* file)
+run_corpus_test(const char* corpus, const char* ft_lex, const char* file)
 {
-	printf("Test '%s': ", file);
+	printf("Test 'corpus/%s': ", file);
 
 	/* `<name>.yy` */
 	char name[NAME_MAX + 1];
@@ -310,7 +329,7 @@ run_test(const char* corpus, const char* ft_lex, const char* file)
 	char binary_flex[PATH_MAX];
 	if (!make_path(source, "%s/%s", corpus, file) ||
 	    !make_path(inputs_dir, "%s/%s", corpus, name) ||
-	    !make_path(dir, "%s/%s", WORK_DIR, name) ||
+	    !make_path(dir, "%s/corpus/%s", WORK_DIR, name) ||
 	    !make_path(binary_ft_lex, "%s/ft_lex", dir) || !make_path(binary_flex, "%s/flex", dir))
 		return false;
 	if (!make_dirs(dir)) {
@@ -399,14 +418,243 @@ run_test(const char* corpus, const char* ft_lex, const char* file)
 	return passed;
 }
 
+/* {{{ Error tests */
+
+/** @brief An error, as expected by a test or as reported by ft_lex */
+typedef struct
+{
+	char type[128];
+	char at[64];
+	char message[512];
+	bool has_type;
+	bool has_at;
+	bool has_message;
+} error_report;
+
+/** @brief Remove the trailing newline and ANSI escape sequences (colors) from @p line */
+static void
+clean_line(char* line)
+{
+	char* out = line;
+	for (const char* in = line; *in && *in != '\n';) {
+		if (in[0] == '\033' && in[1] == '[') {
+			/* Parameter and intermediate bytes, then a final byte */
+			in += 2;
+			while (*in >= 0x20 && *in <= 0x3f)
+				++in;
+			if (*in)
+				++in;
+			continue;
+		}
+		*out++ = *in++;
+	}
+	*out = 0;
+}
+
+/** @brief Copy @p src to the @p size bytes of @p dst, return false if it does not fit */
+static bool
+copy_field(char* dst, size_t size, const char* src)
+{
+	const int len = snprintf(dst, size, "%s", src);
+	return len >= 0 && (size_t)len < size;
+}
+
+/**
+ * @brief Read the expectations of an error test
+ *
+ * @return Whether the file is valid, problems are printed otherwise
+ */
+static bool
+read_expected(const char* path, error_report* expected)
+{
+	*expected = (error_report){};
+	FILE* f = fopen(path, "r");
+	if (!f) {
+		printf("FAILED\n  cannot read '%s'\n", path);
+		return false;
+	}
+
+	char line[1024];
+	bool valid = true;
+	for (size_t number = 1; valid && fgets(line, sizeof(line), f); ++number) {
+		clean_line(line);
+		if (line[0] == 0 || line[0] == '#')
+			continue;
+
+		const char* value = strstr(line, ": ");
+		if (value) {
+			line[value - line] = 0;
+			value += 2;
+		}
+		if (value && !strcmp(line, "type"))
+			valid = expected->has_type = copy_field(expected->type, sizeof(expected->type), value);
+		else if (value && !strcmp(line, "at"))
+			valid = expected->has_at = copy_field(expected->at, sizeof(expected->at), value);
+		else if (value && !strcmp(line, "message"))
+			valid = expected->has_message =
+			  copy_field(expected->message, sizeof(expected->message), value);
+		else
+			valid = false;
+		if (!valid)
+			printf("FAILED\n  %s:%zu: expected `type: ...', `at: ...' or `message: ...'\n", path, number);
+	}
+	fclose(f);
+
+	if (valid && (!expected->has_type || !expected->has_at)) {
+		printf("FAILED\n  %s: `type' and `at' are required\n", path);
+		valid = false;
+	}
+	return valid;
+}
+
+/**
+ * @brief Parse the error displayed by ft_lex in @p path:
+ *
+ *     ERR[<status>]: <type> at <file>:<line>:<column>
+ *     <source excerpt>
+ *
+ *     <message>
+ */
+static void
+read_report(const char* path, error_report* report)
+{
+	*report = (error_report){};
+	FILE* f = fopen(path, "r");
+	if (!f)
+		return;
+
+	enum { kHeader, kExcerpt, kMessage } state = kHeader;
+	char line[1024];
+	while (fgets(line, sizeof(line), f)) {
+		clean_line(line);
+		if (state == kHeader) {
+			const char* type = strncmp(line, "ERR[", 4) ? NULL : strstr(line, "]: ");
+			if (!type)
+				continue;
+			type += 3;
+
+			/* The type ends at the last " at " */
+			char* at = NULL;
+			for (char* p = strstr(line, " at "); p; p = strstr(p + 1, " at "))
+				at = p;
+			if (!at)
+				continue;
+			*at = 0;
+			report->has_type = copy_field(report->type, sizeof(report->type), type);
+
+			/* `<file>:<line>:<column>`, the file may contain `:` */
+			char* column = strrchr(at + 4, ':');
+			if (column) {
+				*column = 0;
+				char* line_number = strrchr(at + 4, ':');
+				*column = ':';
+				if (line_number)
+					report->has_at = copy_field(report->at, sizeof(report->at), line_number + 1);
+			}
+			state = kExcerpt;
+		} else if (state == kExcerpt) {
+			if (line[0] == 0)
+				state = kMessage;
+		} else {
+			report->has_message = copy_field(report->message, sizeof(report->message), line);
+			break;
+		}
+	}
+	fclose(f);
+}
+
+/** @brief Run test `errors/<file>`, from the suite directory @p errors */
+static bool
+run_error_test(const char* errors, const char* ft_lex, const char* file)
+{
+	printf("Test 'errors/%s': ", file);
+
+	/* `<name>.yy` */
+	char name[NAME_MAX + 1];
+	snprintf(name, sizeof(name), "%.*s", (int)(strlen(file) - 3), file);
+
+	char source[PATH_MAX];
+	char expected_path[PATH_MAX];
+	char dir[PATH_MAX];
+	char out[PATH_MAX];
+	char err[PATH_MAX];
+	if (!make_path(source, "%s/%s", errors, file) ||
+	    !make_path(expected_path, "%s/%s.expected", errors, name) ||
+	    !make_path(dir, "%s/errors/%s", WORK_DIR, name) || !make_path(out, "%s/stdout", dir) ||
+	    !make_path(err, "%s/stderr", dir))
+		return false;
+	if (!make_dirs(dir)) {
+		printf("FAILED\n");
+		return false;
+	}
+
+	error_report expected;
+	if (!read_expected(expected_path, &expected))
+		return false;
+
+	const char* const generate[] = { ft_lex, "-t", source, NULL };
+	const int status = run(generate, "/dev/null", out, err);
+
+	struct stat out_stat;
+	const bool wrote_output = stat(out, &out_stat) == 0 && out_stat.st_size != 0;
+	error_report report;
+	read_report(err, &report);
+
+	if (has_sanitizer_report(err)) {
+		printf("FAILED\n  sanitizer error in ft_lex\n");
+	} else if (status != 1) {
+		printf("FAILED\n  expected exit status 1, got ");
+		print_status(status);
+		printf("\n");
+	} else if (wrote_output) {
+		printf("FAILED\n  a scanner was written despite the error\n");
+	} else if (!report.has_type || !report.has_at) {
+		printf("FAILED\n  no error report found\n");
+	} else {
+		const bool type_ok = !strcmp(expected.type, report.type);
+		const bool at_ok = !strcmp(expected.at, report.at);
+		const bool message_ok = !expected.has_message ||
+		                        (report.has_message && !strcmp(expected.message, report.message));
+		if (type_ok && at_ok && message_ok) {
+			printf("ok\n");
+			return true;
+		}
+		printf("FAILED\n");
+		if (!type_ok)
+			printf("  type: expected `%s', got `%s'\n", expected.type, report.type);
+		if (!at_ok)
+			printf("  at: expected `%s', got `%s'\n", expected.at, report.at);
+		if (!message_ok)
+			printf("  message: expected `%s'\n           got      `%s'\n",
+			       expected.message,
+			       report.has_message ? report.message : "");
+	}
+	printf("  ft_lex standard error:\n");
+	print_file(err);
+	return false;
+}
+
+/* }}} */
+
+/** @brief A suite, a directory of the tests directory */
+typedef struct
+{
+	const char* name;
+	/** @brief Run the test `<name>/<file>`, from the suite directory `dir` */
+	bool (*run)(const char* dir, const char* ft_lex, const char* file);
+	/** @brief Selected tests, sorted */
+	struct dirent** tests;
+	int count;
+} suite;
+
 int
 main(int argc, char** argv)
 {
 	if (argc < 3 || argc > 4) {
-		fprintf(stderr, "usage: %s <corpus> <ft_lex> [filter]\n", argv[0]);
+		fprintf(stderr, "usage: %s <tests> <ft_lex> [filter]\n", argv[0]);
 		return 2;
 	}
-	const char* corpus = argv[1];
+	const char* tests_dir = argv[1];
 	const char* ft_lex = argv[2];
 	if (argc == 4)
 		filter = argv[3];
@@ -418,28 +666,51 @@ main(int argc, char** argv)
 		libl = getenv("LIBL");
 	parse_scanner_cflags(getenv("SCANNER_CFLAGS") ? getenv("SCANNER_CFLAGS") : "");
 
-	/* Fail early when flex is missing, instead of failing every test */
-	const char* const check[] = { flex, "--version", NULL };
-	if (run(check, "/dev/null", "/dev/null", "/dev/null") == 127) {
-		fprintf(stderr, "%s: '%s' could not be executed, install flex or set FLEX\n", argv[0], flex);
-		return 2;
+	suite suites[] = {
+		{ .name = "corpus", .run = run_corpus_test },
+		{ .name = "errors", .run = run_error_test },
+	};
+	const size_t suite_count = sizeof(suites) / sizeof(suites[0]);
+
+	/* Select tests first, to know whether flex is needed */
+	for (size_t i = 0; i < suite_count; ++i) {
+		char dir[PATH_MAX];
+		if (!make_path(dir, "%s/%s", tests_dir, suites[i].name))
+			return 2;
+		listed_suite = suites[i].name;
+		/* Sorted, so the output is the same everywhere */
+		suites[i].count = scandir(dir, &suites[i].tests, select_test, alphasort);
+		if (suites[i].count == -1) {
+			perror(dir);
+			return 2;
+		}
 	}
 
-	/* Sorted, so the output is the same everywhere */
-	struct dirent** entries;
-	const int count = scandir(corpus, &entries, select_test, alphasort);
-	if (count == -1) {
-		perror(corpus);
-		return 2;
+	/* Fail early when flex is missing, instead of failing every corpus test */
+	if (suites[0].count > 0) {
+		const char* const check[] = { flex, "--version", NULL };
+		if (run(check, "/dev/null", "/dev/null", "/dev/null") == 127) {
+			fprintf(stderr,
+			        "%s: '%s' could not be executed, install flex or set FLEX\n",
+			        argv[0],
+			        flex);
+			return 2;
+		}
 	}
 
 	size_t passed = 0;
-	const size_t total = (size_t)count;
-	for (size_t i = 0; i < total; ++i) {
-		passed += (size_t)run_test(corpus, ft_lex, entries[i]->d_name);
-		free(entries[i]);
+	size_t total = 0;
+	for (size_t i = 0; i < suite_count; ++i) {
+		char dir[PATH_MAX];
+		if (!make_path(dir, "%s/%s", tests_dir, suites[i].name))
+			return 2;
+		for (int j = 0; j < suites[i].count; ++j) {
+			passed += (size_t)suites[i].run(dir, ft_lex, suites[i].tests[j]->d_name);
+			++total;
+			free(suites[i].tests[j]);
+		}
+		free(suites[i].tests);
 	}
-	free(entries);
 	free(scanner_cflags);
 
 	printf("Result %zu/%zu (%zu%%)\n", passed, total, total == 0 ? 100 : ((passed * 100) / total));

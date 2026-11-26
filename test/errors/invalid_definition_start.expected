@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 1:1
+message: unexpected `9': expected a definition name, a code fragment, a directive or `%%'

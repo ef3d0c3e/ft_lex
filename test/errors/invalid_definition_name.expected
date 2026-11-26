@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 1:2
+message: unexpected `{': invalid character in definition name

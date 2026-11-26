@@ -1,0 +1,3 @@
+type: Expected Token
+at: 1:1
+message: expected `<number>': table size declaration requires a size

@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 2:2
+message: unexpected `z-a': range end is lower than its start

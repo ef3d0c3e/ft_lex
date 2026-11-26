@@ -1,0 +1,3 @@
+type: Unexpected Token
+at: 2:1
+message: unexpected `\777': escape sequence is out of range
